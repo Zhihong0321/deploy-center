@@ -254,3 +254,81 @@ def delete_service_config(db: Session, service_id: str) -> bool:
     db.delete(cfg)
     db.commit()
     return True
+
+
+# --- Webhook processing ---
+
+async def process_webhook(db: Session, payload: Dict[str, Any]) -> None:
+    """Process Railway webhook payload and update deployment record instantly."""
+    # Railway webhook payload structure:
+    # {
+    #   "type": "DEPLOY",
+    #   "status": "SUCCESS" | "FAILED" | "CRASHED" | "DEPLOYING" | "BUILDING",
+    #   "project": {"id": "...", "name": "..."},
+    #   "service": {"id": "...", "name": "..."},
+    #   "deployment": {
+    #     "id": "...",
+    #     "status": "...",
+    #     "createdAt": "...",
+    #     "meta": {"commitHash": "...", "commitMessage": "...", "commitAuthor": "..."}
+    #   },
+    #   "environment": {"name": "production"}
+    # }
+
+    deployment_data = payload.get("deployment", {})
+    service_data = payload.get("service", {})
+    project_data = payload.get("project", {})
+    environment_data = payload.get("environment", {})
+
+    dep_id = deployment_data.get("id")
+    if not dep_id:
+        return
+
+    service_id = service_data.get("id")
+    service_name = service_data.get("name", "unknown")
+    project_id = project_data.get("id")
+    project_name = project_data.get("name", "unknown")
+    status = deployment_data.get("status", "UNKNOWN")
+    environment = environment_data.get("name", "production")
+
+    meta = deployment_data.get("meta", {})
+    commit_sha = meta.get("commitHash") or meta.get("commitSha")
+    commit_message = meta.get("commitMessage")
+    commit_author = meta.get("commitAuthor")
+
+    created_at_str = deployment_data.get("createdAt")
+    updated_at_str = deployment_data.get("updatedAt") or created_at_str
+
+    # Upsert deployment
+    db_dep = db.query(Deployment).filter(Deployment.id == dep_id).first()
+    if not db_dep:
+        db_dep = Deployment(id=dep_id)
+        db.add(db_dep)
+
+    db_dep.service_id = service_id
+    db_dep.service_name = service_name
+    db_dep.project_id = project_id
+    db_dep.project_name = project_name
+    db_dep.environment = environment
+    db_dep.status = status
+    db_dep.commit_sha = commit_sha
+    db_dep.commit_message = commit_message
+    db_dep.commit_author = commit_author
+
+    if created_at_str:
+        db_dep.created_at = datetime.fromisoformat(created_at_str.replace("Z", "+00:00"))
+    if updated_at_str:
+        db_dep.updated_at = datetime.fromisoformat(updated_at_str.replace("Z", "+00:00"))
+
+    db_dep.fetched_at = datetime.utcnow()
+
+    # Fetch error logs if failed
+    if status in ("FAILED", "CRASHED") and not db_dep.error_log:
+        railway = RailwayClient()
+        try:
+            error_log = await railway.get_deployment_logs(dep_id)
+            db_dep.error_log = error_log
+        except Exception:
+            pass
+
+    db.commit()

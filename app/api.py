@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, BackgroundTasks, Query
+from fastapi import APIRouter, Depends, BackgroundTasks, Query, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from typing import Optional
@@ -177,6 +177,18 @@ async def list_github_repos():
         return await client.list_repos()
     except Exception as e:
         return JSONResponse(status_code=502, content={"error": str(e)})
+
+
+@router.post("/webhook/railway")
+async def railway_webhook(request: Request, db: Session = Depends(get_db)):
+    """Receives Railway deployment status webhooks for instant updates."""
+    try:
+        payload = await request.json()
+    except Exception:
+        return JSONResponse(status_code=400, content={"error": "Invalid JSON"})
+
+    await service.process_webhook(db, payload)
+    return {"ok": True}
 
 
 def _dt(dt):
