@@ -26,7 +26,47 @@ class RailwayClient:
             return response.json()
 
     async def get_projects(self) -> List[Dict[str, Any]]:
-        query = """
+        # First get the team ID for the authenticated user's team
+        me_query = """
+        query {
+            me {
+                teams {
+                    edges {
+                        node {
+                            id
+                            name
+                            projects {
+                                edges {
+                                    node {
+                                        id
+                                        name
+                                        services {
+                                            edges {
+                                                node {
+                                                    id
+                                                    name
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        """
+        result = await self.query(me_query)
+        teams = result.get("data", {}).get("me", {}).get("teams", {}).get("edges", [])
+
+        all_projects = []
+        for team_edge in teams:
+            team_projects = team_edge["node"].get("projects", {}).get("edges", [])
+            all_projects.extend(team_projects)
+
+        # Also include personal projects
+        personal_query = """
         query {
             projects {
                 edges {
@@ -46,8 +86,11 @@ class RailwayClient:
             }
         }
         """
-        result = await self.query(query)
-        return result.get("data", {}).get("projects", {}).get("edges", [])
+        personal_result = await self.query(personal_query)
+        personal_projects = personal_result.get("data", {}).get("projects", {}).get("edges", [])
+        all_projects.extend(personal_projects)
+
+        return all_projects
 
     async def list_all_services(self) -> List[Dict[str, Any]]:
         """Flat list of all services across all projects for dropdown."""
