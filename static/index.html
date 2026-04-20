@@ -77,9 +77,14 @@
   .form-row { display: flex; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; align-items: flex-end; }
   .form-group { display: flex; flex-direction: column; gap: 4px; }
   .form-group label { font-size: 11px; color: #7d8590; }
-  .form-group input { background: #0d1117; border: 1px solid #30363d; color: #e6edf3; padding: 6px 10px; border-radius: 6px; font-size: 13px; width: 220px; }
-  .form-group input:focus { outline: none; border-color: #388bfd; }
+  .form-group input,
+  .form-group select { background: #0d1117; border: 1px solid #30363d; color: #e6edf3; padding: 6px 10px; border-radius: 6px; font-size: 13px; width: 260px; }
+  .form-group select { cursor: pointer; }
+  .form-group input:focus,
+  .form-group select:focus { outline: none; border-color: #388bfd; }
   .form-group input.sm { width: 120px; }
+  .form-group select option { background: #161b22; }
+  .select-loading { color: #7d8590; font-size: 12px; margin-top: 4px; }
 
   .empty { text-align: center; padding: 48px; color: #7d8590; }
   .spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid #30363d; border-top-color: #d29922; border-radius: 50%; animation: spin 0.7s linear infinite; vertical-align: middle; margin-right: 4px; }
@@ -195,18 +200,30 @@
 <div class="page" id="page-config">
   <div style="margin-top:16px">
     <div style="font-size:13px;color:#7d8590;margin-bottom:14px">
-      Map each Railway service to its GitHub repo so deploy-center can compare commits.
+      Link each Railway service to its GitHub repo. Deploy-center will compare commits automatically.
     </div>
     <div class="form-row" id="config-form">
-      <div class="form-group"><label>Railway Service ID</label><input id="f-sid" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"></div>
-      <div class="form-group"><label>Service Name</label><input id="f-sname" placeholder="my-api"></div>
-      <div class="form-group"><label>GitHub Repo (owner/repo)</label><input id="f-repo" placeholder="myorg/my-api"></div>
-      <div class="form-group"><label>Branch</label><input id="f-branch" class="sm" placeholder="main" value="main"></div>
+      <div class="form-group">
+        <label>Railway Service</label>
+        <select id="f-svc" onchange="onServiceSelect()">
+          <option value="">Loading Railway services...</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>GitHub Repo</label>
+        <select id="f-repo" onchange="onRepoSelect()">
+          <option value="">Loading GitHub repos...</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Branch</label>
+        <input id="f-branch" class="sm" placeholder="main" value="main">
+      </div>
       <div class="form-group"><label>&nbsp;</label><button class="btn" onclick="saveConfig()">Add / Update</button></div>
     </div>
     <table>
       <thead>
-        <tr><th>Service ID</th><th>Service Name</th><th>GitHub Repo</th><th>Branch</th><th></th></tr>
+        <tr><th>Railway Service</th><th>Project</th><th>GitHub Repo</th><th>Branch</th><th></th></tr>
       </thead>
       <tbody id="cfg-body"><tr><td colspan="5" class="empty">No mappings yet.</td></tr></tbody>
     </table>
@@ -418,6 +435,72 @@ function setDepFilter(f, el) {
 
 // ── Config tab ────────────────────────────────────────────────
 
+let railwayServices = [];
+let githubRepos = [];
+
+async function loadDropdowns() {
+  const svcSel  = document.getElementById('f-svc');
+  const repoSel = document.getElementById('f-repo');
+
+  svcSel.innerHTML  = '<option value="">Loading Railway services...</option>';
+  repoSel.innerHTML = '<option value="">Loading GitHub repos...</option>';
+
+  const [svcRes, repoRes] = await Promise.all([
+    fetch('/api/railway/services'),
+    fetch('/api/github/repos')
+  ]);
+
+  railwayServices = svcRes.ok ? await svcRes.json() : [];
+  githubRepos     = repoRes.ok ? await repoRes.json() : [];
+
+  if (railwayServices.error || !railwayServices.length) {
+    svcSel.innerHTML = '<option value="">No Railway services found</option>';
+  } else {
+    // Group by project
+    const byProject = {};
+    for (const s of railwayServices) {
+      if (!byProject[s.project_name]) byProject[s.project_name] = [];
+      byProject[s.project_name].push(s);
+    }
+    svcSel.innerHTML = '<option value="">— Select Railway service —</option>';
+    for (const [proj, svcs] of Object.entries(byProject)) {
+      const grp = document.createElement('optgroup');
+      grp.label = proj;
+      for (const s of svcs) {
+        const opt = document.createElement('option');
+        opt.value = s.service_id;
+        opt.textContent = s.service_name;
+        opt.dataset.name = s.service_name;
+        grp.appendChild(opt);
+      }
+      svcSel.appendChild(grp);
+    }
+  }
+
+  if (githubRepos.error || !githubRepos.length) {
+    repoSel.innerHTML = '<option value="">No GitHub repos found</option>';
+  } else {
+    repoSel.innerHTML = '<option value="">— Select GitHub repo —</option>';
+    for (const r of githubRepos) {
+      const opt = document.createElement('option');
+      opt.value = r.full_name;
+      opt.textContent = r.full_name + (r.private ? ' 🔒' : '');
+      opt.dataset.branch = r.default_branch;
+      repoSel.appendChild(opt);
+    }
+  }
+}
+
+function onServiceSelect() {}
+
+function onRepoSelect() {
+  const sel = document.getElementById('f-repo');
+  const opt = sel.options[sel.selectedIndex];
+  if (opt && opt.dataset.branch) {
+    document.getElementById('f-branch').value = opt.dataset.branch;
+  }
+}
+
 function renderConfigs(configs) {
   if (!configs.length) {
     document.getElementById('cfg-body').innerHTML = '<tr><td colspan="5" class="empty">No mappings yet. Add one above.</td></tr>';
@@ -425,8 +508,8 @@ function renderConfigs(configs) {
   }
   document.getElementById('cfg-body').innerHTML = configs.map(c => `
     <tr>
+      <td style="font-weight:500">${escHtml(c.service_name)}</td>
       <td class="ts">${escHtml(c.service_id)}</td>
-      <td>${escHtml(c.service_name)}</td>
       <td>${escHtml(c.github_repo)}</td>
       <td>${escHtml(c.github_branch)}</td>
       <td><button class="btn btn-sm btn-danger" onclick="deleteConfig('${c.service_id}')">Remove</button></td>
@@ -434,25 +517,29 @@ function renderConfigs(configs) {
 }
 
 async function saveConfig() {
-  const sid    = document.getElementById('f-sid').value.trim();
-  const sname  = document.getElementById('f-sname').value.trim();
-  const repo   = document.getElementById('f-repo').value.trim();
-  const branch = document.getElementById('f-branch').value.trim() || 'main';
-  if (!sid || !sname || !repo) { alert('Service ID, name, and repo are required.'); return; }
+  const svcSel  = document.getElementById('f-svc');
+  const repoSel = document.getElementById('f-repo');
+  const sid     = svcSel.value;
+  const sname   = svcSel.options[svcSel.selectedIndex]?.dataset.name || svcSel.options[svcSel.selectedIndex]?.textContent || '';
+  const repo    = repoSel.value;
+  const branch  = document.getElementById('f-branch').value.trim() || 'main';
+
+  if (!sid || !repo) { alert('Select a Railway service and a GitHub repo.'); return; }
+
   await fetch('/api/configs', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({service_id: sid, service_name: sname, github_repo: repo, github_branch: branch})
   });
-  document.getElementById('f-sid').value = '';
-  document.getElementById('f-sname').value = '';
-  document.getElementById('f-repo').value = '';
+
+  svcSel.value  = '';
+  repoSel.value = '';
   document.getElementById('f-branch').value = 'main';
   await loadAll();
 }
 
 async function deleteConfig(sid) {
-  if (!confirm('Remove mapping for ' + sid + '?')) return;
+  if (!confirm('Remove this mapping?')) return;
   await fetch('/api/configs/' + sid, {method: 'DELETE'});
   await loadAll();
 }
@@ -494,6 +581,7 @@ function showTab(name, el) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   el.classList.add('active');
   document.getElementById('page-' + name).classList.add('active');
+  if (name === 'config') loadDropdowns();
 }
 
 // ── Helpers ───────────────────────────────────────────────────

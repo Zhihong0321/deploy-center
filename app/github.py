@@ -1,5 +1,5 @@
 import httpx
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from app.config import settings
 
 
@@ -16,7 +16,6 @@ class GitHubClient:
             self.headers["Authorization"] = f"Bearer {self.token}"
 
     async def get_latest_commit(self, repo: str, branch: str = "main") -> Optional[Dict[str, Any]]:
-        """repo = 'owner/repo'"""
         async with httpx.AsyncClient() as client:
             response = await client.get(
                 f"{self.BASE_URL}/repos/{repo}/commits/{branch}",
@@ -24,7 +23,6 @@ class GitHubClient:
                 timeout=15.0
             )
             if response.status_code == 404:
-                # Try master branch
                 response = await client.get(
                     f"{self.BASE_URL}/repos/{repo}/commits/master",
                     headers=self.headers,
@@ -32,7 +30,6 @@ class GitHubClient:
                 )
             if response.status_code != 200:
                 return None
-
             data = response.json()
             return {
                 "sha": data["sha"],
@@ -42,3 +39,32 @@ class GitHubClient:
                 "date": data["commit"]["author"]["date"],
                 "url": data["html_url"]
             }
+
+    async def list_repos(self) -> List[Dict[str, Any]]:
+        """All repos the token has access to, across orgs."""
+        repos = []
+        async with httpx.AsyncClient() as client:
+            # User repos
+            page = 1
+            while True:
+                resp = await client.get(
+                    f"{self.BASE_URL}/user/repos",
+                    headers=self.headers,
+                    params={"per_page": 100, "page": page, "sort": "updated", "affiliation": "owner,collaborator,organization_member"},
+                    timeout=15.0
+                )
+                if resp.status_code != 200:
+                    break
+                batch = resp.json()
+                if not batch:
+                    break
+                for r in batch:
+                    repos.append({
+                        "full_name": r["full_name"],
+                        "default_branch": r.get("default_branch", "main"),
+                        "private": r.get("private", False)
+                    })
+                if len(batch) < 100:
+                    break
+                page += 1
+        return repos

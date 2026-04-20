@@ -49,6 +49,22 @@ class RailwayClient:
         result = await self.query(query)
         return result.get("data", {}).get("projects", {}).get("edges", [])
 
+    async def list_all_services(self) -> List[Dict[str, Any]]:
+        """Flat list of all services across all projects for dropdown."""
+        projects = await self.get_projects()
+        services = []
+        for proj_edge in projects:
+            proj = proj_edge["node"]
+            for svc_edge in proj.get("services", {}).get("edges", []):
+                svc = svc_edge["node"]
+                services.append({
+                    "service_id": svc["id"],
+                    "service_name": svc["name"],
+                    "project_id": proj["id"],
+                    "project_name": proj["name"]
+                })
+        return services
+
     async def get_deployments(self, service_id: str, limit: int = 10) -> List[Dict[str, Any]]:
         query = """
         query GetDeployments($serviceId: String!, $limit: Int!) {

@@ -148,6 +148,28 @@ async def delete_config(service_id: str, db: Session = Depends(get_db)):
     return {"ok": True}
 
 
+@router.get("/railway/services")
+async def list_railway_services():
+    """All Railway services across all projects — for dropdown."""
+    from app.railway import RailwayClient
+    client = RailwayClient()
+    try:
+        return await client.list_all_services()
+    except Exception as e:
+        return JSONResponse(status_code=502, content={"error": str(e)})
+
+
+@router.get("/github/repos")
+async def list_github_repos():
+    """All GitHub repos the token can access — for dropdown."""
+    from app.github import GitHubClient
+    client = GitHubClient()
+    try:
+        return await client.list_repos()
+    except Exception as e:
+        return JSONResponse(status_code=502, content={"error": str(e)})
+
+
 def _dt(dt):
     return dt.isoformat() if dt else None
 
