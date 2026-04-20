@@ -260,21 +260,11 @@ def delete_service_config(db: Session, service_id: str) -> bool:
 
 async def process_webhook(db: Session, payload: Dict[str, Any]) -> None:
     """Process Railway webhook payload and update deployment record instantly."""
-    # Railway webhook payload structure:
-    # {
-    #   "type": "DEPLOY",
-    #   "status": "SUCCESS" | "FAILED" | "CRASHED" | "DEPLOYING" | "BUILDING",
-    #   "project": {"id": "...", "name": "..."},
-    #   "service": {"id": "...", "name": "..."},
-    #   "deployment": {
-    #     "id": "...",
-    #     "status": "...",
-    #     "createdAt": "...",
-    #     "meta": {"commitHash": "...", "commitMessage": "...", "commitAuthor": "..."}
-    #   },
-    #   "environment": {"name": "production"}
-    # }
+    # Log the raw payload for debugging
+    import json
+    print(f"[WEBHOOK] Received payload: {json.dumps(payload, indent=2)}")
 
+    # Railway webhook payload structure (actual structure TBD - logging above will show it)
     deployment_data = payload.get("deployment", {})
     service_data = payload.get("service", {})
     project_data = payload.get("project", {})
