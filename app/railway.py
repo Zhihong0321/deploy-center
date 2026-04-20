@@ -128,3 +128,29 @@ class RailwayClient:
         ]
 
         return "\n".join(error_logs) if error_logs else None
+
+    async def register_webhook_all_projects(self, webhook_url: str) -> List[Dict[str, Any]]:
+        """Register webhook URL on every project the token can access."""
+        projects = await self.get_projects()
+        results = []
+        for proj_edge in projects:
+            proj = proj_edge["node"]
+            project_id = proj["id"]
+            project_name = proj["name"]
+            try:
+                mutation = """
+                mutation CreateWebhook($projectId: String!, $url: String!) {
+                    webhookCreate(input: { projectId: $projectId, url: $url }) {
+                        id
+                        url
+                    }
+                }
+                """
+                result = await self.query(mutation, {"projectId": project_id, "url": webhook_url})
+                if "errors" in result:
+                    results.append({"project": project_name, "ok": False, "error": result["errors"][0]["message"]})
+                else:
+                    results.append({"project": project_name, "ok": True})
+            except Exception as e:
+                results.append({"project": project_name, "ok": False, "error": str(e)})
+        return results

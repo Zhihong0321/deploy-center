@@ -260,11 +260,24 @@ def delete_service_config(db: Session, service_id: str) -> bool:
 
 async def process_webhook(db: Session, payload: Dict[str, Any]) -> None:
     """Process Railway webhook payload and update deployment record instantly."""
-    # Log the raw payload for debugging
     import json
-    print(f"[WEBHOOK] Received payload: {json.dumps(payload, indent=2)}")
+    from app.models import WebhookLog
 
-    # Railway webhook payload structure (actual structure TBD - logging above will show it)
+    # Store webhook log first
+    log_entry = WebhookLog(
+        project_name=payload.get("project", {}).get("name"),
+        service_name=payload.get("service", {}).get("name"),
+        status=payload.get("deployment", {}).get("status") or payload.get("status"),
+        deployment_id=payload.get("deployment", {}).get("id"),
+        raw_payload=json.dumps(payload)
+    )
+    db.add(log_entry)
+
+    # Clean up old logs (keep last 200)
+    old_logs = db.query(WebhookLog).order_by(WebhookLog.received_at.desc()).offset(200).all()
+    for old in old_logs:
+        db.delete(old)
+
     deployment_data = payload.get("deployment", {})
     service_data = payload.get("service", {})
     project_data = payload.get("project", {})
@@ -272,6 +285,7 @@ async def process_webhook(db: Session, payload: Dict[str, Any]) -> None:
 
     dep_id = deployment_data.get("id")
     if not dep_id:
+        db.commit()
         return
 
     service_id = service_data.get("id")
@@ -322,3 +336,8 @@ async def process_webhook(db: Session, payload: Dict[str, Any]) -> None:
             pass
 
     db.commit()
+
+
+def get_webhook_logs(db: Session, limit: int = 50) -> List[WebhookLog]:
+    from app.models import WebhookLog
+    return db.query(WebhookLog).order_by(WebhookLog.received_at.desc()).limit(limit).all()

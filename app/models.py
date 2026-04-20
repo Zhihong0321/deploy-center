@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, DateTime, Text
+from sqlalchemy import Column, String, DateTime, Text, Integer
 from sqlalchemy.sql import func
 from app.database import Base
 
@@ -6,23 +6,20 @@ from app.database import Base
 class Deployment(Base):
     __tablename__ = "deployments"
 
-    id = Column(String, primary_key=True)  # Railway deployment ID
+    id = Column(String, primary_key=True)
     service_id = Column(String, nullable=False, index=True)
     service_name = Column(String, nullable=False)
     project_id = Column(String, nullable=False)
     project_name = Column(String, nullable=False)
     environment = Column(String, nullable=False, default="production")
-    status = Column(String, nullable=False)  # SUCCESS, FAILED, DEPLOYING, CRASHED, etc.
+    status = Column(String, nullable=False)
     created_at = Column(DateTime, nullable=False)
     updated_at = Column(DateTime, nullable=False)
-    # Railway deployed commit
     commit_sha = Column(String, nullable=True)
     commit_message = Column(String, nullable=True)
     commit_author = Column(String, nullable=True)
     commit_url = Column(String, nullable=True)
-    # Error log (only populated on failure)
     error_log = Column(Text, nullable=True)
-    # Meta
     fetched_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
 
@@ -31,25 +28,23 @@ class Project(Base):
 
     id = Column(String, primary_key=True)
     name = Column(String, nullable=False)
-    github_repo = Column(String, nullable=True)  # owner/repo
+    github_repo = Column(String, nullable=True)
     last_synced_at = Column(DateTime, nullable=True)
 
 
 class ServiceConfig(Base):
-    """Manual mapping: Railway service_id → GitHub owner/repo"""
     __tablename__ = "service_configs"
 
     service_id = Column(String, primary_key=True)
     service_name = Column(String, nullable=False)
-    github_repo = Column(String, nullable=False)  # owner/repo
+    github_repo = Column(String, nullable=False)
     github_branch = Column(String, nullable=False, default="main")
 
 
 class GitHubSnapshot(Base):
-    """Latest GitHub commit per repo, refreshed on every sync"""
     __tablename__ = "github_snapshots"
 
-    repo = Column(String, primary_key=True)  # owner/repo
+    repo = Column(String, primary_key=True)
     branch = Column(String, nullable=False, default="main")
     sha = Column(String, nullable=False)
     short_sha = Column(String, nullable=False)
@@ -58,3 +53,17 @@ class GitHubSnapshot(Base):
     committed_at = Column(DateTime, nullable=True)
     url = Column(String, nullable=True)
     fetched_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class WebhookLog(Base):
+    """Every incoming Railway webhook call — last 200 kept."""
+    __tablename__ = "webhook_logs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    received_at = Column(DateTime, server_default=func.now(), index=True)
+    project_name = Column(String, nullable=True)
+    service_name = Column(String, nullable=True)
+    status = Column(String, nullable=True)
+    deployment_id = Column(String, nullable=True)
+    raw_payload = Column(Text, nullable=True)
+

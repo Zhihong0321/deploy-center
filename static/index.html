@@ -151,6 +151,7 @@
   <div class="tab active" onclick="showTab('services', this)">Services</div>
   <div class="tab" onclick="showTab('deployments', this)">Deployments</div>
   <div class="tab" onclick="showTab('config', this)">Repo Mapping</div>
+  <div class="tab" onclick="showTab('webhooks', this)">Webhooks</div>
 </div>
 
 <!-- SERVICES TAB -->
@@ -254,6 +255,25 @@
         <tr><th>Railway Service</th><th>Project</th><th>GitHub Repo</th><th>Branch</th><th></th></tr>
       </thead>
       <tbody id="cfg-body"><tr><td colspan="5" class="empty">No mappings yet.</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- WEBHOOKS TAB -->
+<div class="page" id="page-webhooks">
+  <div style="margin-top:16px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px">
+      <div style="font-size:13px;color:#7d8590">
+        Webhook URL: <code style="background:#0d1117;padding:2px 8px;border-radius:4px;color:#388bfd">https://deploy-center-production.up.railway.app/api/webhook/railway</code>
+      </div>
+      <button class="btn" onclick="registerWebhooks()" id="register-btn">Register on all Railway projects</button>
+    </div>
+    <div id="register-result" style="font-size:12px;margin-bottom:12px"></div>
+    <table>
+      <thead>
+        <tr><th>Received</th><th>Project</th><th>Service</th><th>Status</th><th>Deployment ID</th><th></th></tr>
+      </thead>
+      <tbody id="webhook-body"><tr><td colspan="6" class="empty">No webhooks received yet. Register the webhook on your Railway projects, then trigger a deploy.</td></tr></tbody>
     </table>
   </div>
 </div>
@@ -659,6 +679,72 @@ async function deleteConfig(sid) {
   await loadAll();
 }
 
+// ── Webhooks tab ──────────────────────────────────────────────
+
+async function loadWebhookLogs() {
+  try {
+    const res = await fetch('/api/webhook/logs');
+    const logs = await res.json();
+    renderWebhookLogs(logs);
+  } catch (e) {}
+}
+
+function renderWebhookLogs(logs) {
+  if (!logs.length) {
+    document.getElementById('webhook-body').innerHTML =
+      '<tr><td colspan="6" class="empty">No webhooks received yet. Register the webhook on your Railway projects, then trigger a deploy.</td></tr>';
+    return;
+  }
+  document.getElementById('webhook-body').innerHTML = logs.map(l => {
+    const status = l.status || '—';
+    return `<tr>
+      <td class="ts">${fmtDate(l.received_at)}</td>
+      <td>${escHtml(l.project_name || '—')}</td>
+      <td>${escHtml(l.service_name || '—')}</td>
+      <td><span class="badge ${status}">${status}</span></td>
+      <td class="ts">${escHtml(l.deployment_id || '—')}</td>
+      <td><button class="btn btn-sm" onclick="showRawPayload(${l.id})">Raw</button></td>
+    </tr>`;
+  }).join('');
+}
+
+async function showRawPayload(id) {
+  const res = await fetch('/api/webhook/logs');
+  const logs = await res.json();
+  const log = logs.find(l => l.id === id);
+  if (!log) return;
+  let pretty = log.raw_payload;
+  try { pretty = JSON.stringify(JSON.parse(log.raw_payload), null, 2); } catch(e) {}
+  document.getElementById('modal-log').textContent = pretty;
+  document.getElementById('modal-title').textContent = 'Webhook Payload — ' + fmtDate(log.received_at);
+  document.getElementById('log-modal').classList.add('open');
+}
+
+async function registerWebhooks() {
+  const btn = document.getElementById('register-btn');
+  const result = document.getElementById('register-result');
+  btn.disabled = true;
+  btn.textContent = 'Registering...';
+  result.textContent = '';
+  try {
+    const res = await fetch('/api/webhook/register', {method: 'POST'});
+    const data = await res.json();
+    if (Array.isArray(data)) {
+      const ok = data.filter(r => r.ok).length;
+      const fail = data.filter(r => !r.ok);
+      result.innerHTML = `<span style="color:#3fb950">✓ Registered on ${ok} project(s).</span>` +
+        (fail.length ? ` <span style="color:#f85149">Failed: ${fail.map(r => r.project + ' (' + r.error + ')').join(', ')}</span>` : '');
+    } else {
+      result.innerHTML = `<span style="color:#f85149">${escHtml(JSON.stringify(data))}</span>`;
+    }
+  } catch(e) {
+    result.innerHTML = `<span style="color:#f85149">Error: ${e.message}</span>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Register on all Railway projects';
+  }
+}
+
 // ── Log modal ─────────────────────────────────────────────────
 
 async function showLog(id) {
@@ -697,6 +783,7 @@ function showTab(name, el) {
   el.classList.add('active');
   document.getElementById('page-' + name).classList.add('active');
   if (name === 'config') loadDropdowns();
+  if (name === 'webhooks') loadWebhookLogs();
 }
 
 // ── Helpers ───────────────────────────────────────────────────

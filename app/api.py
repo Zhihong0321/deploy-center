@@ -191,6 +191,33 @@ async def railway_webhook(request: Request, db: Session = Depends(get_db)):
     return {"ok": True}
 
 
+@router.get("/webhook/logs")
+async def webhook_logs(db: Session = Depends(get_db)):
+    logs = service.get_webhook_logs(db, limit=50)
+    return [
+        {
+            "id": l.id,
+            "received_at": _dt(l.received_at),
+            "project_name": l.project_name,
+            "service_name": l.service_name,
+            "status": l.status,
+            "deployment_id": l.deployment_id,
+            "raw_payload": l.raw_payload
+        }
+        for l in logs
+    ]
+
+
+@router.post("/webhook/register")
+async def register_webhooks():
+    """Auto-register the webhook URL on all Railway projects."""
+    from app.railway import RailwayClient
+    client = RailwayClient()
+    webhook_url = f"{settings.app_url}/api/webhook/railway"
+    results = await client.register_webhook_all_projects(webhook_url)
+    return results
+
+
 def _dt(dt):
     return dt.isoformat() if dt else None
 
