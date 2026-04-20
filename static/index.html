@@ -491,7 +491,31 @@ async function loadDropdowns() {
   }
 }
 
-function onServiceSelect() {}
+function onServiceSelect() {
+  const svcSel  = document.getElementById('f-svc');
+  const repoSel = document.getElementById('f-repo');
+  const svcName = svcSel.options[svcSel.selectedIndex]?.dataset.name?.toLowerCase();
+  if (!svcName) return;
+
+  // Try exact match first, then partial
+  let bestIdx = -1;
+  let bestScore = 0;
+  for (let i = 0; i < repoSel.options.length; i++) {
+    const opt = repoSel.options[i];
+    if (!opt.value) continue;
+    const repoName = opt.value.split('/').pop().toLowerCase();
+    if (repoName === svcName) { bestIdx = i; break; }
+    if (repoName.includes(svcName) || svcName.includes(repoName)) {
+      const score = Math.min(repoName.length, svcName.length) / Math.max(repoName.length, svcName.length);
+      if (score > bestScore) { bestScore = score; bestIdx = i; }
+    }
+  }
+
+  if (bestIdx > -1) {
+    repoSel.selectedIndex = bestIdx;
+    onRepoSelect();
+  }
+}
 
 function onRepoSelect() {
   const sel = document.getElementById('f-repo');
