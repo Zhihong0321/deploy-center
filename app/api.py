@@ -3,9 +3,11 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from typing import Optional
 from pydantic import BaseModel
+import httpx
 
-from app.database import get_db
+from app.database import get_db, engine
 from app import service
+from app.config import settings
 
 router = APIRouter()
 
@@ -20,6 +22,71 @@ class ServiceConfigIn(BaseModel):
 @router.get("/status")
 async def get_status(db: Session = Depends(get_db)):
     return service.get_status_summary(db)
+
+
+@router.get("/health")
+async def health_check():
+    """Check connectivity to PostgreSQL, Railway API, and GitHub API."""
+    health = {
+        "postgres": {"ok": False, "error": None},
+        "railway": {"ok": False, "error": None},
+        "github": {"ok": False, "error": None}
+    }
+
+    # Test PostgreSQL
+    try:
+        from sqlalchemy import text
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        health["postgres"]["ok"] = True
+    except Exception as e:
+        health["postgres"]["error"] = str(e)
+
+    # Test Railway API
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                "https://backboard.railway.app/graphql/v2",
+                json={"query": "query { me { id } }"},
+                headers={
+                    "Authorization": f"Bearer {settings.railway_token}",
+                    "Content-Type": "application/json"
+                },
+                timeout=10.0
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                if "errors" in data:
+                    health["railway"]["error"] = data["errors"][0]["message"]
+                else:
+                    health["railway"]["ok"] = True
+            else:
+                health["railway"]["error"] = f"HTTP {resp.status_code}"
+    except Exception as e:
+        health["railway"]["error"] = str(e)
+
+    # Test GitHub API
+    try:
+        async with httpx.AsyncClient() as client:
+            headers = {"Accept": "application/vnd.github+json"}
+            if settings.github_token:
+                headers["Authorization"] = f"Bearer {settings.github_token}"
+            resp = await client.get(
+                "https://api.github.com/user",
+                headers=headers,
+                timeout=10.0
+            )
+            if resp.status_code == 200:
+                health["github"]["ok"] = True
+            elif resp.status_code == 401:
+                health["github"]["error"] = "Invalid token"
+            else:
+                health["github"]["error"] = f"HTTP {resp.status_code}"
+    except Exception as e:
+        health["github"]["error"] = str(e)
+
+    all_ok = all(h["ok"] for h in health.values())
+    return {"ok": all_ok, "checks": health}
 
 
 @router.get("/services")
