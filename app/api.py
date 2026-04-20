@@ -159,6 +159,15 @@ async def list_railway_services():
         return JSONResponse(status_code=502, content={"error": str(e)})
 
 
+@router.get("/railway/debug")
+async def railway_debug():
+    """Raw Railway API response for debugging."""
+    from app.railway import RailwayClient
+    client = RailwayClient()
+    result = await client.query("query { projects { edges { node { id name } } } }")
+    return result
+
+
 @router.get("/github/repos")
 async def list_github_repos():
     """All GitHub repos the token can access — for dropdown."""
