@@ -86,7 +86,22 @@
   .form-group select option { background: #161b22; }
   .select-loading { color: #7d8590; font-size: 12px; margin-top: 4px; }
 
-  .empty { text-align: center; padding: 48px; color: #7d8590; }
+  .live-section { padding: 12px 24px 0; }
+  .live-block { margin-bottom: 16px; }
+  .live-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px; color: #7d8590; margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+  .live-label .dot { width: 7px; height: 7px; border-radius: 50%; background: #d29922; animation: pulse 1.2s infinite; }
+  .live-label .dot.red { background: #f85149; }
+  .live-cards { display: flex; gap: 10px; flex-wrap: wrap; }
+  .live-card { background: #161b22; border: 1px solid #21262d; border-radius: 8px; padding: 10px 14px; min-width: 220px; max-width: 320px; flex: 1; }
+  .live-card.deploying { border-color: #d29922; }
+  .live-card.failed { border-color: #f85149; }
+  .live-card .svc { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+  .live-card .proj { font-size: 11px; color: #7d8590; margin-bottom: 6px; }
+  .live-card .msg { font-size: 12px; color: #7d8590; font-family: monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 280px; }
+  .live-card .ts { font-size: 11px; color: #7d8590; margin-top: 6px; }
+  .live-card .log-link { font-size: 11px; color: #f85149; cursor: pointer; margin-top: 4px; display: inline-block; }
+  .live-card .log-link:hover { text-decoration: underline; }
+  .live-divider { border: none; border-top: 1px solid #21262d; margin: 4px 24px 0; }
   .spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid #30363d; border-top-color: #d29922; border-radius: 50%; animation: spin 0.7s linear infinite; vertical-align: middle; margin-right: 4px; }
   @keyframes spin { to { transform: rotate(360deg); } }
 
@@ -140,6 +155,19 @@
 
 <!-- SERVICES TAB -->
 <div class="page active" id="page-services">
+
+  <!-- LIVE SECTION -->
+  <div class="live-section" id="live-section" style="display:none">
+    <div class="live-block" id="live-deploying-block" style="display:none">
+      <div class="live-label"><span class="dot"></span> Live Deploying</div>
+      <div class="live-cards" id="live-deploying-cards"></div>
+    </div>
+    <div class="live-block" id="live-failed-block" style="display:none">
+      <div class="live-label"><span class="dot red"></span> Recent Failures (last 2h)</div>
+      <div class="live-cards" id="live-failed-cards"></div>
+    </div>
+  </div>
+  <hr class="live-divider" id="live-divider" style="display:none">
   <div id="onboard-services" class="onboard" style="display:none">
     <h2>Getting Started</h2>
     <p>Deploy-center monitors your Railway deployments and compares them with GitHub commits. Here's how to set it up:</p>
@@ -266,6 +294,7 @@ async function loadAll() {
 
     renderHealth(health);
     renderSummary(status, allServices);
+    renderLive(allDeployments);
     renderServices(allServices, configs);
     renderDeployments(allDeployments);
     renderConfigs(configs);
@@ -329,6 +358,68 @@ function renderSummary(status, services) {
     <div class="stat deploying"><div class="label">Deploying</div><div class="value">${deploying}</div></div>
     <div class="stat behind"><div class="label">Behind</div><div class="value">${behind}</div></div>
   `;
+}
+
+// ── Live section ──────────────────────────────────────────────
+
+function renderLive(deps) {
+  const now = Date.now();
+  const twoHoursAgo = now - (2 * 60 * 60 * 1000);
+
+  // Active deployments
+  const deploying = deps.filter(d => ['DEPLOYING', 'BUILDING'].includes(d.status));
+
+  // Recent failures (last 2 hours)
+  const recentFailed = deps.filter(d => {
+    if (!['FAILED', 'CRASHED'].includes(d.status)) return false;
+    const createdAt = new Date(d.created_at).getTime();
+    return createdAt >= twoHoursAgo;
+  }).slice(0, 3);
+
+  const liveSection = document.getElementById('live-section');
+  const deployingBlock = document.getElementById('live-deploying-block');
+  const failedBlock = document.getElementById('live-failed-block');
+  const divider = document.getElementById('live-divider');
+
+  if (!deploying.length && !recentFailed.length) {
+    liveSection.style.display = 'none';
+    divider.style.display = 'none';
+    return;
+  }
+
+  liveSection.style.display = 'block';
+  divider.style.display = 'block';
+
+  // Deploying cards
+  if (deploying.length) {
+    deployingBlock.style.display = 'block';
+    document.getElementById('live-deploying-cards').innerHTML = deploying.map(d => `
+      <div class="live-card deploying">
+        <div class="svc"><span class="spinner"></span>${escHtml(d.service_name)}</div>
+        <div class="proj">${escHtml(d.project_name)}</div>
+        <div class="msg">${escHtml(d.commit_message || '—')}</div>
+        <div class="ts">Started ${fmtDate(d.created_at)}</div>
+      </div>
+    `).join('');
+  } else {
+    deployingBlock.style.display = 'none';
+  }
+
+  // Failed cards
+  if (recentFailed.length) {
+    failedBlock.style.display = 'block';
+    document.getElementById('live-failed-cards').innerHTML = recentFailed.map(d => `
+      <div class="live-card failed">
+        <div class="svc">${escHtml(d.service_name)}</div>
+        <div class="proj">${escHtml(d.project_name)}</div>
+        <div class="msg">${escHtml(d.commit_message || '—')}</div>
+        <div class="ts">Failed ${fmtDate(d.created_at)}</div>
+        <div class="log-link" onclick="showLog('${d.id}')">View error log →</div>
+      </div>
+    `).join('');
+  } else {
+    failedBlock.style.display = 'none';
+  }
 }
 
 // ── Services tab ──────────────────────────────────────────────
