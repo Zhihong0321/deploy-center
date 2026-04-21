@@ -104,7 +104,7 @@ class RailwayClient:
         result = await self.query(query, {"serviceId": service_id, "limit": limit})
         return result.get("data", {}).get("deployments", {}).get("edges", [])
 
-    async def get_deployment_logs(self, deployment_id: str, limit: int = 100) -> Optional[str]:
+    async def get_deployment_logs(self, deployment_id: str, limit: int = 150) -> Optional[str]:
         query = """
         query GetLogs($deploymentId: String!, $limit: Int!) {
             deploymentLogs(deploymentId: $deploymentId, limit: $limit) {
@@ -119,15 +119,10 @@ class RailwayClient:
         if not logs:
             return None
 
-        # Filter for error logs
-        error_logs = [
+        return "\n".join(
             f"[{log.get('timestamp')}] {log.get('message')}"
             for log in logs
-            if any(keyword in log.get('message', '').lower()
-                   for keyword in ['error', 'failed', 'exception', 'fatal'])
-        ]
-
-        return "\n".join(error_logs) if error_logs else None
+        )
 
     async def trigger_deploy(self, service_id: str) -> Dict[str, Any]:
         """Trigger a new deployment for a service via Railway API."""
