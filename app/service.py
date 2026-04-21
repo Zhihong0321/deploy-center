@@ -3,7 +3,7 @@ from sqlalchemy import desc
 from datetime import datetime
 from typing import List, Optional, Dict, Any
 
-from app.models import Deployment, Project, ServiceConfig, GitHubSnapshot
+from app.models import Deployment, Project, ServiceConfig, GitHubSnapshot, WebhookLog
 from app.railway import RailwayClient
 from app.github import GitHubClient
 
@@ -261,7 +261,6 @@ def delete_service_config(db: Session, service_id: str) -> bool:
 async def process_webhook(db: Session, payload: Dict[str, Any]) -> None:
     """Process Railway webhook payload and update deployment record instantly."""
     import json
-    from app.models import WebhookLog
 
     # Store webhook log first
     log_entry = WebhookLog(
@@ -339,5 +338,4 @@ async def process_webhook(db: Session, payload: Dict[str, Any]) -> None:
 
 
 def get_webhook_logs(db: Session, limit: int = 50) -> List[WebhookLog]:
-    from app.models import WebhookLog
     return db.query(WebhookLog).order_by(WebhookLog.received_at.desc()).limit(limit).all()
