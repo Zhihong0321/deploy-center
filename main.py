@@ -6,14 +6,14 @@ import os
 from app.api import router
 from app.database import engine, Base
 from app.config import settings
+# Import all models so Base.metadata knows about every table
+from app.models import Deployment, Project, ServiceConfig, GitHubSnapshot, WebhookLog
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
     Base.metadata.create_all(bind=engine)
     yield
-    # Shutdown
 
 
 app = FastAPI(
