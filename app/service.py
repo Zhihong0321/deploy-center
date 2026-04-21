@@ -80,15 +80,19 @@ async def sync_all(db: Session) -> Dict[str, Any]:
                 github_commit = github_cache.get(repo_key)
 
             try:
-                deployments = await railway.get_deployments(service_id, limit=5)
+                # Fetch more deployments — enough to catch up on missed ones
+                deployments = await railway.get_deployments(service_id, limit=20)
                 for dep_edge in deployments:
                     dep = dep_edge["node"]
                     dep_id = dep["id"]
                     status = dep["status"]
 
                     db_dep = db.query(Deployment).filter(Deployment.id == dep_id).first()
-                    if db_dep and db_dep.status == status and not github_commit:
-                        continue  # No change
+
+                    # Always update if status changed or record is new
+                    # Never skip DEPLOYING/BUILDING — they must be updated when they finish
+                    if db_dep and db_dep.status == status and status not in ("DEPLOYING", "BUILDING"):
+                        continue
 
                     meta = dep.get("meta") or {}
                     commit_sha = meta.get("commitHash") or meta.get("commitSha")
@@ -114,7 +118,8 @@ async def sync_all(db: Session) -> Dict[str, Any]:
                     db_dep.commit_sha = commit_sha
                     db_dep.commit_message = commit_message
                     db_dep.commit_author = commit_author
-                    db_dep.error_log = error_log
+                    if status in ("FAILED", "CRASHED"):
+                        db_dep.error_log = error_log
                     db_dep.fetched_at = datetime.utcnow()
 
                     synced += 1
