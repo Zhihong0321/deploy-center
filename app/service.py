@@ -267,45 +267,49 @@ async def process_webhook(db: Session, payload: Dict[str, Any]) -> None:
     """Process Railway webhook payload and update deployment record instantly."""
     import json
 
-    # Store webhook log first
+    # Real Railway payload structure:
+    # { "type": "Deployment.deployed",
+    #   "details":  { "id", "status", "commitHash", "commitMessage", "commitAuthor", "serviceId", "branch" },
+    #   "resource": { "project": {id,name}, "service": {id,name}, "deployment": {id}, "environment": {name} },
+    #   "timestamp": "..." }
+
+    details  = payload.get("details", {})
+    resource = payload.get("resource", {})
+
+    project_data     = resource.get("project", {})
+    service_data     = resource.get("service", {})
+    environment_data = resource.get("environment", {})
+
+    dep_id       = details.get("id") or resource.get("deployment", {}).get("id")
+    service_id   = details.get("serviceId") or service_data.get("id")
+    service_name = service_data.get("name", "unknown")
+    project_id   = project_data.get("id")
+    project_name = project_data.get("name", "unknown")
+    status       = details.get("status", "UNKNOWN")
+    environment  = environment_data.get("name", "production")
+    commit_sha   = details.get("commitHash")
+    commit_msg   = details.get("commitMessage")
+    commit_auth  = details.get("commitAuthor")
+    timestamp    = payload.get("timestamp")
+
+    # Always log every incoming webhook
     log_entry = WebhookLog(
-        project_name=payload.get("project", {}).get("name"),
-        service_name=payload.get("service", {}).get("name"),
-        status=payload.get("deployment", {}).get("status") or payload.get("status"),
-        deployment_id=payload.get("deployment", {}).get("id"),
+        project_name=project_name,
+        service_name=service_name,
+        status=status,
+        deployment_id=dep_id,
         raw_payload=json.dumps(payload)
     )
     db.add(log_entry)
 
-    # Clean up old logs (keep last 200)
+    # Keep last 200 logs
     old_logs = db.query(WebhookLog).order_by(WebhookLog.received_at.desc()).offset(200).all()
     for old in old_logs:
         db.delete(old)
 
-    deployment_data = payload.get("deployment", {})
-    service_data = payload.get("service", {})
-    project_data = payload.get("project", {})
-    environment_data = payload.get("environment", {})
-
-    dep_id = deployment_data.get("id")
     if not dep_id:
         db.commit()
         return
-
-    service_id = service_data.get("id")
-    service_name = service_data.get("name", "unknown")
-    project_id = project_data.get("id")
-    project_name = project_data.get("name", "unknown")
-    status = deployment_data.get("status", "UNKNOWN")
-    environment = environment_data.get("name", "production")
-
-    meta = deployment_data.get("meta", {})
-    commit_sha = meta.get("commitHash") or meta.get("commitSha")
-    commit_message = meta.get("commitMessage")
-    commit_author = meta.get("commitAuthor")
-
-    created_at_str = deployment_data.get("createdAt")
-    updated_at_str = deployment_data.get("updatedAt") or created_at_str
 
     # Upsert deployment
     db_dep = db.query(Deployment).filter(Deployment.id == dep_id).first()
@@ -313,29 +317,28 @@ async def process_webhook(db: Session, payload: Dict[str, Any]) -> None:
         db_dep = Deployment(id=dep_id)
         db.add(db_dep)
 
-    db_dep.service_id = service_id
-    db_dep.service_name = service_name
-    db_dep.project_id = project_id
-    db_dep.project_name = project_name
-    db_dep.environment = environment
-    db_dep.status = status
-    db_dep.commit_sha = commit_sha
-    db_dep.commit_message = commit_message
-    db_dep.commit_author = commit_author
+    db_dep.service_id     = service_id
+    db_dep.service_name   = service_name
+    db_dep.project_id     = project_id
+    db_dep.project_name   = project_name
+    db_dep.environment    = environment
+    db_dep.status         = status
+    db_dep.commit_sha     = commit_sha
+    db_dep.commit_message = commit_msg
+    db_dep.commit_author  = commit_auth
+    db_dep.fetched_at     = datetime.utcnow()
 
-    if created_at_str:
-        db_dep.created_at = datetime.fromisoformat(created_at_str.replace("Z", "+00:00"))
-    if updated_at_str:
-        db_dep.updated_at = datetime.fromisoformat(updated_at_str.replace("Z", "+00:00"))
+    if timestamp:
+        ts = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+        if not db_dep.created_at:
+            db_dep.created_at = ts
+        db_dep.updated_at = ts
 
-    db_dep.fetched_at = datetime.utcnow()
-
-    # Fetch error logs if failed
+    # Fetch error logs immediately on failure
     if status in ("FAILED", "CRASHED") and not db_dep.error_log:
         railway = RailwayClient()
         try:
-            error_log = await railway.get_deployment_logs(dep_id)
-            db_dep.error_log = error_log
+            db_dep.error_log = await railway.get_deployment_logs(dep_id)
         except Exception:
             pass
 
