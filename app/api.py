@@ -264,6 +264,62 @@ async def delete_config(service_id: str, db: Session = Depends(get_db)):
     return {"ok": True}
 
 
+@router.post("/configs/auto-map")
+async def auto_map_configs(db: Session = Depends(get_db)):
+    """
+    Auto-detect GitHub repo for each Railway service by fuzzy name matching.
+    Only creates mappings for services with no existing config.
+    Returns list of what was mapped and what was skipped.
+    """
+    from app.railway import RailwayClient
+    from app.github import GitHubClient
+
+    railway_client = RailwayClient()
+    github_client = GitHubClient()
+
+    railway_svcs = await railway_client.list_all_services()
+    github_repos = await github_client.list_repos()
+
+    existing = {c.service_id for c in service.get_service_configs(db)}
+
+    repo_index = [
+        (r["full_name"], r["full_name"].split("/")[-1].lower().replace("-", "").replace("_", ""), r["default_branch"])
+        for r in github_repos
+    ]
+
+    mapped = []
+    skipped = []
+
+    for svc in railway_svcs:
+        sid = svc["service_id"]
+        sname = svc["service_name"]
+
+        if sid in existing:
+            skipped.append({"service_name": sname, "reason": "already mapped"})
+            continue
+
+        normalized = sname.lower().replace("-", "").replace("_", "").replace(" ", "")
+        best_repo, best_branch, best_score = None, "main", 0.0
+
+        for full_name, rname, branch in repo_index:
+            if rname == normalized:
+                best_repo, best_branch, best_score = full_name, branch, 1.0
+                break
+            if rname in normalized or normalized in rname:
+                score = min(len(rname), len(normalized)) / max(len(rname), len(normalized))
+                if score > best_score:
+                    best_score = score
+                    best_repo, best_branch = full_name, branch
+
+        if best_repo and best_score >= 0.7:
+            service.upsert_service_config(db, sid, sname, best_repo, best_branch)
+            mapped.append({"service_name": sname, "github_repo": best_repo, "branch": best_branch, "score": round(best_score, 2)})
+        else:
+            skipped.append({"service_name": sname, "reason": "no match"})
+
+    return {"mapped": len(mapped), "skipped": len(skipped), "details": mapped, "unmatched": [s for s in skipped if s["reason"] == "no match"]}
+
+
 @router.get("/railway/services")
 async def list_railway_services():
     """All Railway services across all projects — for dropdown."""
