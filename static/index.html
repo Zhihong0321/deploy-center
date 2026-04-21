@@ -266,14 +266,17 @@
       <div style="font-size:13px;color:#7d8590">
         Webhook URL: <code style="background:#0d1117;padding:2px 8px;border-radius:4px;color:#388bfd">https://deploy-center-production.up.railway.app/api/webhook/railway</code>
       </div>
-      <button class="btn" onclick="registerWebhooks()" id="register-btn">Register on all Railway projects</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn" onclick="registerWebhooks()" id="register-btn">Register on all projects</button>
+        <button class="btn btn-danger" onclick="clearWebhookLogs()">Clear logs</button>
+      </div>
     </div>
     <div id="register-result" style="font-size:12px;margin-bottom:12px"></div>
     <table>
       <thead>
         <tr><th>Received</th><th>Project</th><th>Service</th><th>Status</th><th>Deployment ID</th><th></th></tr>
       </thead>
-      <tbody id="webhook-body"><tr><td colspan="6" class="empty">No webhooks received yet. Register the webhook on your Railway projects, then trigger a deploy.</td></tr></tbody>
+      <tbody id="webhook-body"><tr><td colspan="6" class="empty">No webhooks received yet.</td></tr></tbody>
     </table>
   </div>
 </div>
@@ -741,8 +744,14 @@ async function registerWebhooks() {
     result.innerHTML = `<span style="color:#f85149">Error: ${e.message}</span>`;
   } finally {
     btn.disabled = false;
-    btn.textContent = 'Register on all Railway projects';
+    btn.textContent = 'Register on all projects';
   }
+}
+
+async function clearWebhookLogs() {
+  if (!confirm('Clear all webhook logs?')) return;
+  await fetch('/api/webhook/logs', {method: 'DELETE'});
+  await loadWebhookLogs();
 }
 
 // ── Log modal ─────────────────────────────────────────────────

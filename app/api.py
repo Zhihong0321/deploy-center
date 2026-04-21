@@ -191,6 +191,15 @@ async def railway_webhook(request: Request, db: Session = Depends(get_db)):
     return {"ok": True}
 
 
+@router.delete("/webhook/logs")
+async def clear_webhook_logs(db: Session = Depends(get_db)):
+    """Clear all webhook logs."""
+    from app.models import WebhookLog
+    db.query(WebhookLog).delete()
+    db.commit()
+    return {"ok": True}
+
+
 @router.get("/webhook/logs")
 async def webhook_logs(db: Session = Depends(get_db)):
     logs = service.get_webhook_logs(db, limit=50)
