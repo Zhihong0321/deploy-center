@@ -283,6 +283,7 @@ async def get_service_status(db: Session, service_id: str) -> Dict[str, Any]:
 async def get_agent_overview(db: Session) -> Dict[str, Any]:
     """Single-call overview for AI agents: health + failing + behind + deploying."""
     from sqlalchemy import func
+    from app.railway import RailwayClient
 
     svcs = get_services_view(db)
 
@@ -290,15 +291,23 @@ async def get_agent_overview(db: Session) -> Dict[str, Any]:
     behind = [s for s in svcs if s["sync_status"] == "BEHIND"]
     deploying = [s for s in svcs if s["railway"]["status"] in ("DEPLOYING", "BUILDING")]
 
-    # Attach error logs to failing services
+    # Attach error logs to failing services — fetch on demand if null
+    railway = RailwayClient()
     for s in failing:
         dep_id = s["railway"].get("deployment_id")
         if dep_id:
             dep = db.query(Deployment).filter(Deployment.id == dep_id).first()
-            s["error_log"] = dep.error_log if dep else None
+            if dep:
+                if not dep.error_log:
+                    try:
+                        dep.error_log = await railway.get_deployment_logs(dep_id)
+                        db.commit()
+                    except Exception:
+                        pass
+                s["error_log"] = dep.error_log
 
     rows = db.query(Deployment.status, func.count(Deployment.id)).group_by(Deployment.status).all()
-    counts = {row[0]: row[1] for row in rows}
+    counts = {row[0]: row[1] for row in rows if row[0] not in ("REMOVED", "SLEEPING", "SKIPPED")}
 
     return {
         "summary": {
