@@ -217,6 +217,104 @@ def get_deployment(db: Session, deployment_id: str) -> Optional[Deployment]:
     return db.query(Deployment).filter(Deployment.id == deployment_id).first()
 
 
+def get_latest_deployment(db: Session, service_id: Optional[str] = None) -> Optional[Deployment]:
+    q = db.query(Deployment)
+    if service_id:
+        q = q.filter(Deployment.service_id == service_id)
+    return q.order_by(desc(Deployment.created_at)).first()
+
+
+async def get_service_status(db: Session, service_id: str) -> Dict[str, Any]:
+    """Full status for one service — single call for AI agents."""
+    from app.railway import RailwayClient
+
+    svcs = get_services_view(db)
+    svc = next((s for s in svcs if s["service_id"] == service_id), None)
+    if not svc:
+        return {"error": "Service not found", "service_id": service_id}
+
+    # Last 5 deployments
+    history = (
+        db.query(Deployment)
+        .filter(Deployment.service_id == service_id)
+        .order_by(desc(Deployment.created_at))
+        .limit(5)
+        .all()
+    )
+
+    # Error log for latest failed deployment
+    error_log = None
+    latest_dep = history[0] if history else None
+    if latest_dep and latest_dep.status in ("FAILED", "CRASHED"):
+        error_log = latest_dep.error_log
+        if not error_log:
+            try:
+                railway = RailwayClient()
+                error_log = await railway.get_deployment_logs(latest_dep.id)
+                if error_log:
+                    latest_dep.error_log = error_log
+                    db.commit()
+            except Exception:
+                pass
+
+    return {
+        "service_id": service_id,
+        "service_name": svc["service_name"],
+        "project_name": svc["project_name"],
+        "sync_status": svc["sync_status"],
+        "github_repo": svc["github_repo"],
+        "github_branch": svc["github_branch"],
+        "railway": svc["railway"],
+        "github": svc["github"],
+        "error_log": error_log,
+        "recent_deployments": [
+            {
+                "id": d.id,
+                "status": d.status,
+                "commit_sha": d.commit_sha,
+                "commit_message": d.commit_message,
+                "created_at": (d.created_at.isoformat() + "Z") if d.created_at else None,
+            }
+            for d in history
+        ],
+    }
+
+
+async def get_agent_overview(db: Session) -> Dict[str, Any]:
+    """Single-call overview for AI agents: health + failing + behind + deploying."""
+    from sqlalchemy import func
+
+    svcs = get_services_view(db)
+
+    failing = [s for s in svcs if s["railway"]["status"] in ("FAILED", "CRASHED")]
+    behind = [s for s in svcs if s["sync_status"] == "BEHIND"]
+    deploying = [s for s in svcs if s["railway"]["status"] in ("DEPLOYING", "BUILDING")]
+
+    # Attach error logs to failing services
+    for s in failing:
+        dep_id = s["railway"].get("deployment_id")
+        if dep_id:
+            dep = db.query(Deployment).filter(Deployment.id == dep_id).first()
+            s["error_log"] = dep.error_log if dep else None
+
+    rows = db.query(Deployment.status, func.count(Deployment.id)).group_by(Deployment.status).all()
+    counts = {row[0]: row[1] for row in rows}
+
+    return {
+        "summary": {
+            "total_services": len(svcs),
+            "failing": len(failing),
+            "behind": len(behind),
+            "deploying": len(deploying),
+            "in_sync": len([s for s in svcs if s["sync_status"] == "IN_SYNC"]),
+            "deployment_counts": counts,
+        },
+        "failing": failing,
+        "behind": behind,
+        "deploying": deploying,
+    }
+
+
 def get_projects(db: Session) -> List[Project]:
     return db.query(Project).all()
 

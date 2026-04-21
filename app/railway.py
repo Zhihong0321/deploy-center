@@ -129,6 +129,18 @@ class RailwayClient:
 
         return "\n".join(error_logs) if error_logs else None
 
+    async def trigger_deploy(self, service_id: str) -> Dict[str, Any]:
+        """Trigger a new deployment for a service via Railway API."""
+        mutation = """
+        mutation TriggerDeploy($serviceId: String!) {
+            serviceInstanceRedeploy(serviceId: $serviceId)
+        }
+        """
+        result = await self.query(mutation, {"serviceId": service_id})
+        if "errors" in result:
+            raise Exception(result["errors"][0]["message"])
+        return result.get("data", {})
+
     async def register_webhook_all_projects(self, webhook_url: str) -> List[Dict[str, Any]]:
         """Register webhook URL on every project the token can access."""
         projects = await self.get_projects()

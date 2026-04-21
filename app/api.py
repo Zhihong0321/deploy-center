@@ -95,6 +95,113 @@ async def list_services(db: Session = Depends(get_db)):
     return service.get_services_view(db)
 
 
+@router.get("/services/failing")
+async def list_failing_services(db: Session = Depends(get_db)):
+    """Services with FAILED or CRASHED status — quick triage view for AI agents."""
+    svcs = service.get_services_view(db)
+    return [s for s in svcs if s["railway"]["status"] in ("FAILED", "CRASHED")]
+
+
+@router.get("/services/behind")
+async def list_behind_services(db: Session = Depends(get_db)):
+    """Services where GitHub is ahead of Railway — needs a deploy."""
+    svcs = service.get_services_view(db)
+    return [s for s in svcs if s["sync_status"] == "BEHIND"]
+
+
+@router.get("/services/{service_id}/status")
+async def get_service_status(service_id: str, db: Session = Depends(get_db)):
+    """
+    Full status for one service in a single call.
+    Returns: deploy status, deployed commit, latest GitHub commit, sync gap, last error log, recent history.
+    Designed for AI agents — one call gives the complete picture.
+    """
+    return await service.get_service_status(db, service_id)
+
+
+@router.post("/deploy/{service_id}")
+async def trigger_deploy(service_id: str, db: Session = Depends(get_db)):
+    """Trigger a new Railway deployment for the given service."""
+    from app.railway import RailwayClient
+    client = RailwayClient()
+    try:
+        result = await client.trigger_deploy(service_id)
+        return {"ok": True, "deployment_id": result.get("id"), "status": result.get("status")}
+    except Exception as e:
+        return JSONResponse(status_code=502, content={"ok": False, "error": str(e)})
+
+
+@router.get("/agent/overview")
+async def agent_overview(db: Session = Depends(get_db)):
+    """
+    Single-call overview for AI agents.
+    Returns health, summary counts, all failing services with error logs,
+    all behind services, and any active deployments.
+    """
+    return await service.get_agent_overview(db)
+
+
+@router.get("/agent/docs")
+async def agent_docs():
+    """Machine-readable API reference for AI agents."""
+    return {
+        "base_url": settings.app_url,
+        "description": "Deploy Center — Railway deployment monitoring and control for AI agents.",
+        "endpoints": [
+            {
+                "method": "GET", "path": "/api/agent/overview",
+                "description": "START HERE. Single call: health + failing services + behind services + active deploys.",
+                "returns": "{ health, summary, failing[], behind[], deploying[] }"
+            },
+            {
+                "method": "GET", "path": "/api/services",
+                "description": "All services with Railway status and GitHub latest commit side by side.",
+                "returns": "Array of service objects with sync_status: IN_SYNC | BEHIND | FAILED | UNKNOWN"
+            },
+            {
+                "method": "GET", "path": "/api/services/failing",
+                "description": "Only services with FAILED or CRASHED deploy status.",
+            },
+            {
+                "method": "GET", "path": "/api/services/behind",
+                "description": "Only services where GitHub has newer commits than what Railway has deployed.",
+            },
+            {
+                "method": "GET", "path": "/api/services/{service_id}/status",
+                "description": "Full status for one service: deploy status, commit diff, error log, last 5 deployments.",
+            },
+            {
+                "method": "POST", "path": "/api/deploy/{service_id}",
+                "description": "Trigger a new deployment for a service.",
+                "returns": "{ ok, deployment_id, status }"
+            },
+            {
+                "method": "POST", "path": "/api/refresh",
+                "description": "Force sync all services from Railway and GitHub APIs.",
+                "returns": "{ ok, synced, errors[] }"
+            },
+            {
+                "method": "GET", "path": "/api/deployments",
+                "description": "Deployment history.",
+                "params": "limit (max 200), status (SUCCESS|FAILED|CRASHED|DEPLOYING|BUILDING), project_id"
+            },
+            {
+                "method": "GET", "path": "/api/deployments/latest",
+                "description": "Latest deployment overall, or for a specific service.",
+                "params": "service_id (optional)"
+            },
+            {
+                "method": "GET", "path": "/api/deployments/{deployment_id}",
+                "description": "Single deployment with full error_log.",
+            },
+            {
+                "method": "GET", "path": "/api/health",
+                "description": "Connectivity check: PostgreSQL, Railway API, GitHub API.",
+            },
+        ]
+    }
+
+
 @router.get("/deployments")
 async def list_deployments(
     limit: int = Query(50, le=200),
@@ -104,6 +211,15 @@ async def list_deployments(
 ):
     deployments = service.get_deployments(db, limit=limit, status=status, project_id=project_id)
     return [_serialize(d) for d in deployments]
+
+
+@router.get("/deployments/latest")
+async def get_latest_deployment(service_id: Optional[str] = None, db: Session = Depends(get_db)):
+    """Get latest deployment, optionally filtered by service_id."""
+    dep = service.get_latest_deployment(db, service_id=service_id)
+    if not dep:
+        return JSONResponse(status_code=404, content={"error": "Not found"})
+    return _serialize(dep, include_logs=False)
 
 
 @router.get("/deployments/{deployment_id}")
