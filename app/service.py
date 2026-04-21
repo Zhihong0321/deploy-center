@@ -179,7 +179,7 @@ def get_services_view(db: Session) -> List[Dict[str, Any]]:
                 "commit_sha": deployed_sha,
                 "commit_message": dep.commit_message if dep else None,
                 "commit_author": dep.commit_author if dep else None,
-                "deployed_at": dep.created_at.isoformat() if dep and dep.created_at else None,
+                "deployed_at": (dep.created_at.isoformat() + 'Z') if dep and dep.created_at else None,
             },
             # GitHub side
             "github": {
@@ -187,9 +187,9 @@ def get_services_view(db: Session) -> List[Dict[str, Any]]:
                 "short_sha": snap.short_sha if snap else None,
                 "message": snap.message if snap else None,
                 "author": snap.author if snap else None,
-                "committed_at": snap.committed_at.isoformat() if snap and snap.committed_at else None,
+                "committed_at": (snap.committed_at.isoformat() + 'Z') if snap and snap.committed_at else None,
                 "url": snap.url if snap else None,
-                "fetched_at": snap.fetched_at.isoformat() if snap and snap.fetched_at else None,
+                "fetched_at": (snap.fetched_at.isoformat() + 'Z') if snap and snap.fetched_at else None,
             },
             # Cross-reference
             "sync_status": sync_status,

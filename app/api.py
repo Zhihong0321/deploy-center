@@ -228,7 +228,12 @@ async def register_webhooks():
 
 
 def _dt(dt):
-    return dt.isoformat() if dt else None
+    if not dt:
+        return None
+    s = dt.isoformat()
+    if not s.endswith('Z') and '+' not in s:
+        s += 'Z'
+    return s
 
 
 def _serialize(d, include_logs=False):

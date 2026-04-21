@@ -799,10 +799,12 @@ function showTab(name, el) {
 
 function fmtDate(iso) {
   if (!iso) return '—';
-  const now = Date.now();
+  // Parse as UTC, then compare against current UTC time
+  const now = new Date().getTime();
   const then = new Date(iso).getTime();
   const diff = Math.floor((now - then) / 1000);
 
+  if (diff < 0) return 'just now'; // future timestamp
   if (diff < 60) return 'just now';
   if (diff < 3600) return `~${Math.floor(diff / 60)}min ago`;
   if (diff < 86400) return `~${Math.floor(diff / 3600)}hr ago`;
