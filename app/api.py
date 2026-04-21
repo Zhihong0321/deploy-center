@@ -256,14 +256,6 @@ async def upsert_config(body: ServiceConfigIn, db: Session = Depends(get_db)):
     return {"ok": True, "service_id": cfg.service_id}
 
 
-@router.delete("/configs/{service_id}")
-async def delete_config(service_id: str, db: Session = Depends(get_db)):
-    deleted = service.delete_service_config(db, service_id)
-    if not deleted:
-        return JSONResponse(status_code=404, content={"error": "Not found"})
-    return {"ok": True}
-
-
 @router.post("/configs/auto-map")
 async def auto_map_configs(db: Session = Depends(get_db)):
     """
@@ -318,6 +310,14 @@ async def auto_map_configs(db: Session = Depends(get_db)):
             skipped.append({"service_name": sname, "reason": "no match"})
 
     return {"mapped": len(mapped), "skipped": len(skipped), "details": mapped, "unmatched": [s for s in skipped if s["reason"] == "no match"]}
+
+
+@router.delete("/configs/{service_id}")
+async def delete_config(service_id: str, db: Session = Depends(get_db)):
+    deleted = service.delete_service_config(db, service_id)
+    if not deleted:
+        return JSONResponse(status_code=404, content={"error": "Not found"})
+    return {"ok": True}
 
 
 @router.get("/railway/services")
